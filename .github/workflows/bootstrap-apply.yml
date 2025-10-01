@@ -15,7 +15,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+          aws-region: ap-south-2
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -27,9 +27,14 @@ jobs:
       - name: Terraform Apply
         working-directory: terraform-bootstrap
         run: terraform apply -auto-approve
-      - name: Save Backend Outputs
-        working-directory: terraform-bootstrap
-        id: save_outputs
+        
+      - name: Save backend info to file
         run: |
-          echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
-          echo "DYNAMO_TABLE=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_ENV
+          echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" > backend.env
+          echo "DYNAMO_TABLE=$(terraform output -raw dynamodb_table_name)" >> backend.env
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-backend
+          path: backend.env
