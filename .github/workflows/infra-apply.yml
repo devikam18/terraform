@@ -1,13 +1,16 @@
 name: Terraform Infra Apply
 
 on:
-  workflow_dispatch:   # Or use workflow_run to trigger automatically after bootstrap
+  workflow_run:
+    workflows: ["Terraform Bootstrap Apply"]
+    types:
+      - completed
 
 jobs:
   terraform:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Configure AWS
@@ -20,25 +23,12 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Download backend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-backend
-          path: terraform-bootstrap
-
-      - name: Load backend variables
-        run: |
-          source terraform-bootstrap/backend.env
-          echo "S3_BUCKET=$S3_BUCKET"
-          echo "DYNAMO_TABLE=$DYNAMO_TABLE"
-
       - name: Terraform Init with Backend
         working-directory: terraform
         run: |
-          source terraform-bootstrap/backend.env
           terraform init -reconfigure \
-            -backend-config="bucket=$S3_BUCKET" \
-            -backend-config="dynamodb_table=$DYNAMO_TABLE" \
+            -backend-config="bucket=${{ github.event.workflow_run.outputs.s3_bucket }}" \
+            -backend-config="dynamodb_table=${{ github.event.workflow_run.outputs.dynamo_table }}" \
             -backend-config="region=ap-south-2" \
             -backend-config="key=infra/terraform.tfstate"
 
@@ -49,4 +39,3 @@ jobs:
       - name: Terraform Apply
         working-directory: terraform
         run: terraform apply -auto-approve
-
