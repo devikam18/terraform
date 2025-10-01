@@ -35,7 +35,7 @@ jobs:
 
       # 4️⃣ Terraform Destroy (bootstrap resources first if needed)
       - name: Terraform Destroy - Bootstrap
-        working-directory: terraform/terraform-bootstrap
+        working-directory: terraform-bootstrap
         run: terraform destroy -auto-approve
 
       - name: Terraform Destroy - Main Infra
