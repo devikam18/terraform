@@ -1,0 +1,7 @@
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.1758529830.backup
+terraform/terraform.tfstate.backup
+terraform/terraform-bootstrap/terraform.tfstate
+terraform/terraform-bootstrap/terraform.tfstate.backup
+terraform/terraform-bootstrap/.terraform/
