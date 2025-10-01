@@ -2,11 +2,11 @@
 # Variables
 ############################################
 variable "bucket_name_prefix" {
-  default = "my-terraform-state-bucket-demo"
+  default = "my-terraform-state-bucket"
 }
 
-variable "dynamodb_table_name" {
-  default = "terraform-locks-demo"
+variable "dynamodb_table_name_prefix" {
+  default = "terraform-locks"
 }
 
 variable "environment" {
@@ -14,9 +14,9 @@ variable "environment" {
 }
 
 ############################################
-# Random ID for uniqueness
+# Random Suffix
 ############################################
-resource "random_id" "bucket_suffix" {
+resource "random_id" "suffix" {
   byte_length = 4
 }
 
@@ -31,40 +31,28 @@ provider "aws" {
 # S3 Bucket for Terraform State
 ############################################
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "${var.bucket_name_prefix}-${random_id.bucket_suffix.hex}"
+  bucket = "${var.bucket_name_prefix}-${var.environment}-${random_id.suffix.hex}"
 
   tags = {
     Name        = "terraform-state"
     Environment = var.environment
   }
-
-  # Optional: remove if you want to allow destroy in CI/CD
-  lifecycle {
-    prevent_destroy = false
-  }
 }
 
 resource "aws_s3_bucket_versioning" "versioning" {
   bucket = aws_s3_bucket.terraform_state.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
+  versioning_configuration { status = "Enabled" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   bucket = aws_s3_bucket.terraform_state.bucket
-
   rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
+    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
   }
 }
 
 resource "aws_s3_bucket_public_access_block" "public_access" {
-  bucket = aws_s3_bucket.terraform_state.id
-
+  bucket                  = aws_s3_bucket.terraform_state.id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -74,23 +62,14 @@ resource "aws_s3_bucket_public_access_block" "public_access" {
 ############################################
 # DynamoDB Table for Locking
 ############################################
-resource "random_id" "dynamodb_suffix" {
-  byte_length = 4
-}
-
 resource "aws_dynamodb_table" "terraform_locks" {
-  name         = "terraform-locks-${random_id.dynamodb_suffix.hex}"
+  name         = "${var.dynamodb_table_name_prefix}-${var.environment}-${random_id.suffix.hex}"
   hash_key     = "LockID"
   billing_mode = "PAY_PER_REQUEST"
 
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
+  attribute { name = "LockID", type = "S" }
 
-  tags = {
-    Environment = var.environment
-  }
+  tags = { Environment = var.environment }
 }
 
 ############################################
