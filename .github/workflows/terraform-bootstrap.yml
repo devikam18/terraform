@@ -29,10 +29,6 @@ jobs:
         working-directory: terraform-bootstrap
         run: terraform init
 
-      - name: Terraform Plan
-        working-directory: terraform-bootstrap
-        run: terraform plan -out=tfplan
-
       - name: Terraform Apply
         working-directory: terraform-bootstrap
         run: terraform apply -auto-approve tfplan
