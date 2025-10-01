@@ -44,9 +44,9 @@ jobs:
 
       # 5️⃣ Terraform Init + Destroy - Main Infra
       - name: Terraform Init - Main Infra
-        working-directory: terraform  # <- Correct path
+        
         run: terraform init -input=false
 
       - name: Terraform Destroy - Main Infra
-        working-directory: terraform
+       
         run: terraform destroy -auto-approve
