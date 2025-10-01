@@ -1,7 +1,10 @@
 name: Terraform Infra Apply
 
 on:
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Terraform Bootstrap Apply"]
+    types:
+      - completed
 
 jobs:
   terraform:
@@ -29,8 +32,8 @@ jobs:
       - name: Load backend variables
         run: |
           source terraform-bootstrap/backend.env
-          echo "Backend S3 bucket: $S3_BUCKET"
-          echo "Backend DynamoDB table: $DYNAMO_TABLE"
+          echo "S3_BUCKET=$S3_BUCKET"
+          echo "DYNAMO_TABLE=$DYNAMO_TABLE"
 
       - name: Terraform Init with Backend
         run: |
