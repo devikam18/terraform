@@ -34,7 +34,7 @@ jobs:
           echo "DYNAMO_TABLE=$(terraform output -raw dynamodb_table_name)" >> backend.env
 
       - name: Upload backend artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: terraform-backend
           path: backend.env
