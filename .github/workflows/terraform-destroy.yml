@@ -48,13 +48,13 @@ jobs:
 
       # 5️⃣ Destroy Bootstrap last (S3 + DynamoDB)
       - name: Terraform Init - Bootstrap
-        working-directory: terraform/terraform-bootstrap
+        working-directory: terraform-bootstrap
         run: terraform init -input=false
 
       - name: Show State - Bootstrap
-        working-directory: terraform/terraform-bootstrap
+        working-directory: terraform-bootstrap
         run: terraform state list || echo "No resources in bootstrap state"
 
       - name: Terraform Destroy - Bootstrap
-        working-directory: terraform/terraform-bootstrap
+        working-directory: terraform-bootstrap
         run: terraform destroy -auto-approve
