@@ -2,7 +2,9 @@
 # Terraform Backend
 ############################################
 terraform {
-  backend "s3" {}   # Keep it empty; values are passed dynamically via -backend-config
+  backend "s3" {
+    region = "ap-south-2"  # placeholder, can be overridden
+  }
 }
 ############################################
 # Provider
