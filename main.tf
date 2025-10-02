@@ -135,7 +135,7 @@ resource "aws_key_pair" "deployer" {
 
 resource "local_file" "private_key" {
   content         = tls_private_key.deployer.private_key_pem
-  filename        = "terraform/deployer.pem"
+  filename        = "deployer.pem"
   file_permission = "0400"
 }
 
