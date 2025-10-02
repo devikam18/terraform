@@ -1,7 +1,9 @@
 name: Terraform CI/CD
 
 on:
-  workflow_dispatch:   # manual trigger from GitHub Actions UI
+  workflow_dispatch:
+  repository_dispatch:
+    types: [trigger-terraform]
 
 jobs:
   terraform:
