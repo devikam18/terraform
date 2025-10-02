@@ -3,10 +3,10 @@
 ############################################
 terraform {
   backend "s3" {
-    bucket         = "my-terraform-state-bucket-dev"
+    bucket         = "my-terraform-state-bucket-latest-dev"
     key            = "infra/terraform.tfstate"
     region         = "ap-south-2"
-    dynamodb_table = "terraform-locks-dev"
+    dynamodb_table = "terraform-locks-latest-dev"
     encrypt        = true
   }
 }
