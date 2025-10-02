@@ -2,11 +2,11 @@
 # Variables
 ############################################
 variable "bucket_name_prefix" {
-  default = "my-terraform-backend-bucket"
+  default = "my-terraform-backend-bucket-latest"
 }
 
 variable "dynamodb_table_name_prefix" {
-  default = "terraform-dynamo-lock"
+  default = "terraform-dynamo-latest-lock"
 }
 
 variable "environment" {
