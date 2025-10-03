@@ -75,6 +75,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ secrets.GH_PAT }}
+          owner: devikam18
           repository: frontend
           event-type: trigger-frontend
           client-payload: |
