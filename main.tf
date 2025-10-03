@@ -158,7 +158,7 @@ resource "aws_iam_instance_profile" "ec2_profile_latest" {
 # EC2 Instance
 ############################################
 resource "aws_instance" "web_server" {
-  ami                    = "ami-0cbe896ecf507b2a4"
+  ami                    = "ami-0bd4cda58efa33d23"
   instance_type          = "t3.micro"
   subnet_id              = aws_subnet.subnet_1.id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
