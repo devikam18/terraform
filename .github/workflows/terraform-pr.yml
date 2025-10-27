@@ -1,18 +1,15 @@
-name: Terraform PR CI/CD with Comment Control
+name: Terraform CI/CD
 
 on:
-  # When a pull request is created or updated
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
       - main
 
-  # Manual trigger
-  workflow_dispatch:
-
-  # When someone comments /plan or /apply on a PR
   issue_comment:
     types: [created]
+
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,131 +17,93 @@ permissions:
   issues: write
 
 jobs:
-  ########################################
-  # Terraform Plan
-  ########################################
   terraform-plan:
-    name: Terraform Plan
-    runs-on: ubuntu-latest
     if: >
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan'))
-
-    env:
-      AWS_REGION: ap-south-2
-      TF_IN_AUTOMATION: "true"
+      (github.event_name == 'issue_comment' && contains(toLower(github.event.comment.body), '/plan'))
+    runs-on: ubuntu-latest
+    name: Terraform Plan
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.5
+          aws-region: ap-south-2
 
       - name: Terraform Init
-        run: terraform init -input=false
-
-      - name: Terraform Validate
-        run: terraform validate
+        run: terraform init
 
       - name: Terraform Plan
-        run: terraform plan -no-color -out=tfplan > plan.txt
+        id: plan
+        run: terraform plan -out=tfplan.out
 
-      - name: Save Plan File
-        id: save
-        run: echo "plan_ready=true" >> $GITHUB_OUTPUT
-
-      - name: Upload Terraform Plan
+      - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
-          path: tfplan
+          path: tfplan.out
 
-      - name: Post Plan Result to PR
-        uses: actions/github-script@v6
+      - name: Comment Plan Output on PR
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('plan.txt', 'utf8').slice(0, 65000);
-            const issue_number = context.payload.issue?.number || context.payload.pull_request?.number;
+            const { execSync } = require('child_process');
+            const planOutput = execSync('terraform show -no-color tfplan.out').toString();
+            const commentBody = `### Terraform Plan 📜\n\`\`\`\n${planOutput.substring(0, 65000)}\n\`\`\`\n✅ To apply these changes, comment **/apply** below.`;
             await github.rest.issues.createComment({
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue_number,
-              body: `🧩 **Terraform Plan Result:**\n\`\`\`\n${plan}\n\`\`\`\n💬 Comment **/apply** to deploy these changes.`
+              body: commentBody
             });
 
-  ########################################
-  # Terraform Apply
-  ########################################
   terraform-apply:
-    name: Terraform Apply
+    if: >
+      github.event_name == 'issue_comment' && contains(toLower(github.event.comment.body), '/apply')
     runs-on: ubuntu-latest
+    name: Terraform Apply
     needs: terraform-plan
-    if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply')
-
-    env:
-      AWS_REGION: ap-south-2
-      TF_IN_AUTOMATION: "true"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ap-south-2
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.5
-
-      - name: Terraform Init
-        run: terraform init -input=false
-
-      - name: Download Plan File
+      - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
           name: terraform-plan
-          path: .
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve tfplan.out
 
-      - name: Get Terraform Output
-        id: tf
-        run: |
-          if terraform output -raw ec2_public_ip >/dev/null 2>&1; then
-            WEB_IP=$(terraform output -raw ec2_public_ip)
-            echo "WEB_IP=$WEB_IP" >> $GITHUB_ENV
-          else
-            echo "WEB_IP=Not available" >> $GITHUB_ENV
-          fi
-
-      - name: Post Apply Result to PR
-        uses: actions/github-script@v6
+      - name: Comment Apply Success
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
-            const ip = process.env.WEB_IP;
-            const issue_number = context.payload.issue?.number || context.payload.pull_request?.number;
             await github.rest.issues.createComment({
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue_number,
-              body: `✅ **Terraform Apply completed successfully!** 🚀\n🌐 EC2 Public IP: **${ip}**`
+              body: '🚀 Terraform Apply completed successfully!'
             });
