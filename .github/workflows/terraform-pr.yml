@@ -2,7 +2,7 @@ name: Terraform PR CI/CD with Comment Control
 
 
 on:
-  # Auto trigger when PR is created or updated
+  # Auto trigger
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
