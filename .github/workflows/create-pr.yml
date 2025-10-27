@@ -1,0 +1,25 @@
+name: Auto PR Creation on Commit
+
+on:
+  push:
+    branches:
+      - feature/*   # triggers only when pushing to feature branches
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_PAT }}
+          commit-message: "Auto PR from ${{ github.ref_name }}"
+          title: "Auto PR from ${{ github.ref_name }}"
+          body: |
+            This PR was automatically created from branch **${{ github.ref_name }}**.
+          base: main
+          branch: ${{ github.ref_name }}
