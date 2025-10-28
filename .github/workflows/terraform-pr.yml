@@ -45,22 +45,25 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color -out=tfplan.txt > plan_output.txt
-          echo "PLAN_OUTPUT<<EOF" >> $GITHUB_ENV
-          cat plan_output.txt >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          terraform plan -no-color -out=tfplan.txt | tee plan_output.txt
 
-      - name: Comment Plan Output on PR
+      - name: Upload plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-output
+          path: plan_output.txt
+
+      - name: Comment Plan on PR
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
             🧩 **Terraform Plan Result:**
             ```
-            ${{ env.PLAN_OUTPUT }}
+            ${{ steps.plan.outputs.stdout || 'Plan output saved as artifact.' }}
             ```
-            💬 Comment **/apply** to deploy these changes.
-  
+            💬 Comment `/apply` to deploy these changes.
+
   terraform-apply:
     name: Terraform Apply
     if: >
@@ -90,18 +93,14 @@ jobs:
       - name: Terraform Apply
         id: apply
         run: |
-          terraform apply -auto-approve -no-color > apply_output.txt
-          echo "APPLY_OUTPUT<<EOF" >> $GITHUB_ENV
-          cat apply_output.txt >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          terraform apply -auto-approve -no-color | tee apply_output.txt
 
-      - name: Comment Apply Output
+      - name: Comment Apply Result
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.issue.number }}
           body: |
             🚀 **Terraform Apply Result:**
             ```
-            ${{ env.APPLY_OUTPUT }}
+            ${{ steps.apply.outputs.stdout || 'Apply output available in logs.' }}
             ```
-
