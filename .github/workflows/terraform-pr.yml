@@ -1,17 +1,11 @@
-name: Terraform CI/CD
-
+name: Terraform CI/CD with PR Automation
 
 on:
-  # Auto trigger
-  pull_request:
-    types: [opened, synchronize, reopened]
+  push:
     branches:
-      - main
-
+      - developer
   issue_comment:
     types: [created]
-
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,93 +13,107 @@ permissions:
   issues: write
 
 jobs:
-  terraform-plan:
-    if: >
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(toLower(github.event.comment.body), '/plan'))
+  ########################################
+  # 1. Auto-create Pull Request when pushing to 'developer'
+  ########################################
+  create-pr:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    name: Terraform Plan
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Create or update PR to main
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: developer
+          title: "Auto PR from developer branch"
+          body: "This PR was automatically created for Terraform workflow execution."
 
-      - name: Configure AWS Credentials
+  ########################################
+  # 2. Terraform Plan & Apply from PR comments
+  ########################################
+  terraform:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      (
+        contains(github.event.comment.body, '/plan') ||
+        contains(github.event.comment.body, '/apply')
+      )
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-south-2
+      TF_IN_AUTOMATION: "true"
+
+    steps:
+      ########################################
+      # Checkout PR branch
+      ########################################
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: developer
+
+      ########################################
+      # Configure AWS credentials
+      ########################################
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-2
+          aws-region: ${{ env.AWS_REGION }}
 
+      ########################################
+      # Setup Terraform
+      ########################################
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      ########################################
+      # Terraform Init
+      ########################################
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
-      - name: Terraform Plan
-        id: plan
-        run: terraform plan -out=tfplan.out
+      ########################################
+      # Terraform Validate
+      ########################################
+      - name: Terraform Validate
+        run: terraform validate
 
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
+      ########################################
+      # Terraform Plan or Apply
+      ########################################
+      - name: Run Terraform Command
+        id: tf
+        run: |
+          if [[ "${{ github.event.comment.body }}" == *"/plan"* ]]; then
+            echo "🪴 Running Terraform Plan..."
+            terraform plan -no-color -out=tfplan | tee plan.log
+          elif [[ "${{ github.event.comment.body }}" == *"/apply"* ]]; then
+            echo "🚀 Running Terraform Apply..."
+            terraform apply -auto-approve -no-color tfplan | tee plan.log
+          fi
+        continue-on-error: true
+
+      ########################################
+      # Post Terraform Output to PR Comment
+      ########################################
+      - name: Post Terraform Output to PR
+        uses: peter-evans/create-or-update-comment@v4
         with:
-          name: terraform-plan
-          path: tfplan.out
-
-      - name: Comment Plan Output on PR
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_PAT }}
-          script: |
-            const fs = require('fs');
-            const { execSync } = require('child_process');
-            const planOutput = execSync('terraform show -no-color tfplan.out').toString();
-            const commentBody = `### Terraform Plan 📜\n\`\`\`\n${planOutput.substring(0, 65000)}\n\`\`\`\n✅ To apply these changes, comment **/apply** below.`;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
-
-  terraform-apply:
-    if: >
-      github.event_name == 'issue_comment' && contains(toLower(github.event.comment.body), '/apply')
-    runs-on: ubuntu-latest
-    name: Terraform Apply
-    needs: terraform-plan
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-2
-
-      - name: Download Plan Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan.out
-
-      - name: Comment Apply Success
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_PAT }}
-          script: |
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '🚀 Terraform Apply completed successfully!'
-            });
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            ## 🪴 Terraform Output
+            ```
+            ${{ steps.tf.outputs.stdout || '' }}
+            ```
