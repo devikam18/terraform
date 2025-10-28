@@ -139,5 +139,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number,
-              body: `✅ **Terraform Apply completed successfully!** 🚀\n🌐 EC2 Public IP: **${process.env.WEB_IP}**`
+              body: `✅ **Terraform Apply completed successfully!* 🚀\n🌐 EC2 Public IP: **${process.env.WEB_IP}**`
             });
