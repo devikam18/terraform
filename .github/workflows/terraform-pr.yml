@@ -18,7 +18,8 @@ permissions:
 env:
   AWS_REGION: ap-south-2
   TF_IN_AUTOMATION: "true"
-  AUTO_APPLY: "false" # set to "true" to auto-apply after plan
+  AUTO_APPLY: "false" # set to "true" for automatic apply after plan
+  TF_DIR: terraform_infra # <--- change if your terraform files are elsewhere
 
 jobs:
   ########################################
@@ -50,7 +51,7 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request_target'
-    needs: [create-pr]
+    # Removed 'needs' to avoid blocking when PR is manual
 
     steps:
       - name: Checkout PR Code
@@ -72,19 +73,19 @@ jobs:
           terraform_version: 1.9.5
 
       - name: Terraform Init
-        run: terraform init -input=false
+        run: terraform -chdir=${{ env.TF_DIR }} init -input=false
 
       - name: Terraform Validate
-        run: terraform validate
+        run: terraform -chdir=${{ env.TF_DIR }} validate
 
       - name: Terraform Plan
-        run: terraform plan -no-color -out=tfplan | tee plan.txt
+        run: terraform -chdir=${{ env.TF_DIR }} plan -no-color -out=tfplan | tee plan.txt
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan
-          path: tfplan
+          name: terraform-plan-${{ github.event.pull_request.number }}
+          path: ${{ env.TF_DIR }}/tfplan
 
       - name: Post Plan Result to PR
         uses: actions/github-script@v7
@@ -168,22 +169,22 @@ jobs:
           terraform_version: 1.9.5
 
       - name: Terraform Init
-        run: terraform init -input=false
+        run: terraform -chdir=${{ env.TF_DIR }} init -input=false
 
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
         with:
-          name: terraform-plan
-          path: .
+          name: terraform-plan-${{ env.PR_NUMBER }}
+          path: ${{ env.TF_DIR }}
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan | tee apply.txt
+        run: terraform -chdir=${{ env.TF_DIR }} apply -auto-approve tfplan | tee apply.txt
 
       - name: Capture Output
         id: output
         run: |
-          if terraform output -raw ec2_public_ip >/dev/null 2>&1; then
-            echo "WEB_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
+          if terraform -chdir=${{ env.TF_DIR }} output -raw ec2_public_ip >/dev/null 2>&1; then
+            echo "WEB_IP=$(terraform -chdir=${{ env.TF_DIR }} output -raw ec2_public_ip)" >> $GITHUB_ENV
           else
             echo "WEB_IP=Not available" >> $GITHUB_ENV
           fi
