@@ -4,21 +4,24 @@ on:
   push:
     branches:
       - developer
-  pull_request:
-    branches:
-      - developer
-    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
 jobs:
   terraform:
-    if: >
-      github.ref == 'refs/heads/developer' ||
-      (github.event_name == 'pull_request' && github.base_ref == 'developer') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan')) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply'))
+    name: Terraform Plan & Apply
     runs-on: ubuntu-latest
+
+    # Run when:
+    # - code is pushed to developer branch
+    # - OR comment contains /plan or /apply
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'issue_comment' && (
+        contains(github.event.comment.body, '/plan') ||
+        contains(github.event.comment.body, '/apply')
+      ))
+
     env:
       AWS_REGION: ap-south-2
       TF_IN_AUTOMATION: "true"
@@ -27,21 +30,11 @@ jobs:
       ########################################
       # 1. Checkout repository
       ########################################
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       ########################################
-      # 2. Configure AWS credentials
-      ########################################
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      ########################################
-      # 3. Setup Terraform
+      # 2. Setup Terraform
       ########################################
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -49,46 +42,21 @@ jobs:
           terraform_version: 1.9.5
 
       ########################################
-      # 4. Terraform Init & Validate
+      # 3. Initialize Terraform
       ########################################
       - name: Terraform Init
-        run: terraform init -input=false
-
-      - name: Terraform Validate
-        run: terraform validate
+        run: terraform init
 
       ########################################
-      # 5. Terraform Plan
+      # 4. Terraform Plan (triggered via /plan)
       ########################################
       - name: Terraform Plan
-        if: >
-          github.event_name == 'push' ||
-          github.event_name == 'pull_request' ||
-          (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan'))
-        id: plan
-        run: terraform plan -no-color -out=tfplan | tee plan.log
-
-      - name: Post Plan Comment
-        if: >
-          github.event_name == 'push' ||
-          github.event_name == 'pull_request' ||
-          (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan'))
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: terraform-plan
-          path: plan.log
+        if: contains(github.event.comment.body, '/plan') || github.event_name == 'push'
+        run: terraform plan -out=tfplan
 
       ########################################
-      # 6. Terraform Apply (only on comment)
+      # 5. Terraform Apply (triggered via /apply)
       ########################################
       - name: Terraform Apply
-        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply')
-        id: apply
-        run: terraform apply -auto-approve tfplan | tee apply.log
-
-      - name: Post Apply Comment
-        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply')
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: terraform-apply
-          path: apply.log
+        if: contains(github.event.comment.body, '/apply')
+        run: terraform apply -auto-approve tfplan
