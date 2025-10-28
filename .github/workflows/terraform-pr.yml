@@ -3,6 +3,7 @@ name: Terraform PR CI/CD with Comment Control + Auto PR + Auto Apply
 on:
   push:
     branches:
+      - main
       - developer
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -11,14 +12,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-  issues: write
+  issues: read
 
 env:
   AWS_REGION: ap-south-2
   TF_IN_AUTOMATION: "true"
-  AUTO_APPLY: "false" # set to "true" for automatic apply after plan
+  AUTO_APPLY: "true" # set to "true" for automatic apply after plan
   TF_DIR: terraform_infra # <--- change if your terraform files are elsewhere
 
 jobs:
@@ -133,7 +134,7 @@ jobs:
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        contains(github.event.comment.body, '/apply'))
-      || (github.event_name == 'repository_dispatch' &&
+       (github.event_name == 'repository_dispatch' &&
           github.event.action == 'trigger-terraform-apply')
 
     steps:
