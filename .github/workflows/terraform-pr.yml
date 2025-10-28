@@ -18,7 +18,7 @@ permissions:
 env:
   AWS_REGION: ap-south-2
   TF_IN_AUTOMATION: "true"
-  AUTO_APPLY: "false" # set this true for auto apply
+  AUTO_APPLY: "false" # set to "true" to auto-apply after plan
 
 jobs:
   ########################################
@@ -136,11 +136,24 @@ jobs:
           github.event.action == 'trigger-terraform-apply')
 
     steps:
+      - name: Set Branch and Repo Variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "BRANCH=${{ github.event.issue.pull_request.head.ref }}" >> $GITHUB_ENV
+            echo "REPO=${{ github.event.issue.pull_request.head.repo.full_name }}" >> $GITHUB_ENV
+            echo "PR_NUMBER=${{ github.event.issue.number }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH=${{ github.event.client_payload.ref }}" >> $GITHUB_ENV
+            echo "REPO=${{ github.event.client_payload.repo }}" >> $GITHUB_ENV
+            echo "PR_NUMBER=${{ github.event.client_payload.pr_number }}" >> $GITHUB_ENV
+          fi
+
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue?.pull_request?.head.ref || github.event.client_payload?.ref }}
-          repository: ${{ github.event.issue?.pull_request?.head.repo.full_name || github.event.client_payload?.repo }}
+          ref: ${{ env.BRANCH }}
+          repository: ${{ env.REPO }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -180,7 +193,7 @@ jobs:
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
-            const issue_number = context.payload.issue?.number || context.payload.client_payload?.pr_number;
+            const issue_number = process.env.PR_NUMBER;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
