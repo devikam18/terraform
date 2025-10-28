@@ -1,4 +1,4 @@
-name: Terraform PR CI/CD with Comment Control
+name: Terraform PR CI/CD with Comment Control + Auto Apply
 
 on:
   pull_request_target:
@@ -17,25 +17,26 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  AWS_REGION: ap-south-2
+  TF_IN_AUTOMATION: "true"
+  AUTO_APPLY: "false" # 🔹 set this to "true" to enable auto apply after plan
+
 jobs:
+  ########################################
+  # Terraform Plan
+  ########################################
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
-       contains(github.event.comment.body, '/plan'))
-
-    env:
-      AWS_REGION: ap-south-2
-      TF_IN_AUTOMATION: "true"
+    if: github.event_name == 'pull_request_target'
 
     steps:
-      - name: Checkout repository (PR head)
+      - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -71,31 +72,49 @@ jobs:
           script: |
             const fs = require('fs');
             const plan = fs.readFileSync('plan.txt', 'utf8').slice(0, 65000);
-            const issue_number = context.payload.issue?.number || context.payload.pull_request?.number;
+            const prNumber = context.payload.pull_request.number;
+            const autoApply = process.env.AUTO_APPLY === 'true';
+            let body = `🧩 **Terraform Plan Result:**\n\`\`\`\n${plan}\n\`\`\``;
+            if (autoApply) {
+              body += `\n⚙️ Auto-apply is enabled. Applying changes now...`;
+            } else {
+              body += `\n💬 Comment **/apply** to deploy these changes.`;
+            }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number,
-              body: `🧩 **Terraform Plan Result:**\n\`\`\`\n${plan}\n\`\`\`\n💬 Comment **/apply** to deploy these changes.`
+              issue_number: prNumber,
+              body: body
             });
 
+      # 🔹 Automatically trigger Apply if AUTO_APPLY=true
+      - name: Trigger Apply Job
+        if: env.AUTO_APPLY == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GH_PAT }}
+          event-type: trigger-terraform-apply
+          client-payload: '{"pr_number": "${{ github.event.pull_request.number }}"}'
+
+  ########################################
+  # Terraform Apply (via comment or auto)
+  ########################################
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/apply')
-
-    env:
-      AWS_REGION: ap-south-2
-      TF_IN_AUTOMATION: "true"
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/apply'))
+      || (github.event_name == 'repository_dispatch' &&
+          github.event.action == 'trigger-terraform-apply')
 
     steps:
-      - name: Checkout repository (PR head)
+      - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue.pull_request.head.sha }}
+          ref: ${{ github.event.issue?.pull_request?.head.ref || github.event.client_payload?.ref || github.event.pull_request?.head.ref }}
+          repository: ${{ github.event.issue?.pull_request?.head.repo.full_name || github.event.client_payload?.repo || github.event.pull_request?.head.repo.full_name }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -134,10 +153,10 @@ jobs:
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
-            const issue_number = context.payload.issue?.number || context.payload.pull_request?.number;
+            const issue_number = context.payload.issue?.number || context.payload.client_payload?.pr_number;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number,
-              body: `✅ **Terraform Apply completed successfully!* 🚀\n🌐 EC2 Public IP: **${process.env.WEB_IP}**`
+              body: `✅ **Terraform Apply completed successfully!** 🚀\n🌐 EC2 Public IP: **${process.env.WEB_IP}**`
             });
