@@ -2,9 +2,9 @@ name: Terraform PR CI/CD with Comment Control
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
     branches:
       - main
-    types: [opened, synchronize, reopened]
 
   issue_comment:
     types: [created]
@@ -15,62 +15,46 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  id-token: write
 
 jobs:
-  ########################################
-  # Terraform Plan
-  ########################################
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    if: >
-      (github.event_name == 'pull_request') ||
+    if: |
+      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request != null &&
-       contains(github.event.comment.body, '/plan'))
+       github.event.issue.pull_request &&
+       (github.event.comment.body == '/plan'))
 
     env:
-      TF_IN_AUTOMATION: "true"
       AWS_REGION: ap-south-2
+      TF_IN_AUTOMATION: "true"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.5
 
-      - name: Terraform Init
-        run: terraform init -input=false
-        env:
-          TF_VAR_github_token: ${{ secrets.GH_PAT }}
+      - run: terraform init -input=false
+      - run: terraform validate
 
-      - name: Terraform Validate
-        run: terraform validate
+      - run: terraform plan -no-color -out=tfplan > plan.txt
 
-      - name: Terraform Plan
-        run: terraform plan -no-color -out=tfplan | tee plan.txt
-        env:
-          TF_VAR_github_token: ${{ secrets.GH_PAT }}
-
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: tfplan
 
       - name: Post Plan Result to PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
@@ -84,73 +68,57 @@ jobs:
               body: `🧩 **Terraform Plan Result:**\n\`\`\`\n${plan}\n\`\`\`\n💬 Comment **/apply** to deploy these changes.`
             });
 
-  ########################################
-  # Terraform Apply
-  ########################################
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    if: >
+    if: |
       github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '/apply')
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/apply'
 
     env:
-      TF_IN_AUTOMATION: "true"
       AWS_REGION: ap-south-2
+      TF_IN_AUTOMATION: "true"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.5
 
-      - name: Terraform Init
-        run: terraform init -input=false
-        env:
-          TF_VAR_github_token: ${{ secrets.GH_PAT }}
+      - run: terraform init -input=false
 
-      - name: Download Terraform Plan
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: terraform-plan
           path: .
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan | tee apply.txt
-        env:
-          TF_VAR_github_token: ${{ secrets.GH_PAT }}
+      - run: terraform apply -auto-approve tfplan
 
-      - name: Get Terraform Output
-        id: tf
+      - id: tf
         run: |
           if terraform output -raw ec2_public_ip >/dev/null 2>&1; then
-            WEB_IP=$(terraform output -raw ec2_public_ip)
-            echo "WEB_IP=$WEB_IP" >> $GITHUB_ENV
+            echo "WEB_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
           else
             echo "WEB_IP=Not available" >> $GITHUB_ENV
           fi
 
       - name: Post Apply Result to PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
-            const ip = process.env.WEB_IP;
             const issue_number = context.payload.issue?.number || context.payload.pull_request?.number;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number,
-              body: `✅ **Terraform Apply completed successfully!** 🚀\n🌐 EC2 Public IP: **${ip}**`
+              body: `✅ **Terraform Apply completed successfully!** 🚀\n🌐 EC2 Public IP: **${process.env.WEB_IP}**`
             });
