@@ -1,103 +1,107 @@
-name: Terraform CI/CD for Developer Branch
+name: Terraform Plan & Apply via PR Comments
 
 on:
-  push:
-    branches:
-      - developer
   pull_request:
     branches:
-      - main
+      - developer
+    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   issues: write
 
+env:
+  AWS_REGION: ap-south-2
+  TF_IN_AUTOMATION: "true"
+
 jobs:
-  terraform:
-    name: Terraform Plan & Apply
+  terraform-plan:
+    name: Terraform Plan
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
-    if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' && (
-        contains(github.event.comment.body, '/plan') ||
-        contains(github.event.comment.body, '/apply')
-      ))
-
-    env:
-      AWS_REGION: ap-south-2
-      TF_IN_AUTOMATION: "true"
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.5
+          terraform_version: 1.6.6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Validate
-        run: terraform validate
-
       - name: Terraform Plan
         id: plan
-        if: contains(github.event.comment.body, '/plan') || github.event_name == 'pull_request'
         run: |
-          terraform plan -no-color -out=tfplan | tee plan.log
-        continue-on-error: true
+          terraform plan -no-color -out=tfplan.txt > plan_output.txt
+          echo "PLAN_OUTPUT<<EOF" >> $GITHUB_ENV
+          cat plan_output.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Comment Plan Output on PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            🧩 **Terraform Plan Result:**
+            ```
+            ${{ env.PLAN_OUTPUT }}
+            ```
+            💬 Comment **/apply** to deploy these changes.
+  
+  terraform-apply:
+    name: Terraform Apply
+    if: >
+      github.event_name == 'issue_comment' &&
+      contains(github.event.comment.body, '/apply')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
 
       - name: Terraform Apply
         id: apply
-        if: contains(github.event.comment.body, '/apply')
         run: |
-          terraform apply -auto-approve -no-color tfplan | tee apply.log
-        continue-on-error: true
+          terraform apply -auto-approve -no-color > apply_output.txt
+          echo "APPLY_OUTPUT<<EOF" >> $GITHUB_ENV
+          cat apply_output.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: Upload Plan Log
-        if: steps.plan.conclusion == 'success'
-        uses: actions/upload-artifact@v4
+      - name: Comment Apply Output
+        uses: peter-evans/create-or-update-comment@v4
         with:
-          name: terraform-plan-log
-          path: plan.log
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            🚀 **Terraform Apply Result:**
+            ```
+            ${{ env.APPLY_OUTPUT }}
+            ```
 
-      - name: Upload Apply Log
-        if: steps.apply.conclusion == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-apply-log
-          path: apply.log
-
-      - name: Comment Plan Output on PR
-        if: steps.plan.conclusion == 'success' && github.event.pull_request.number != ''
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          number: ${{ github.event.pull_request.number }}
-          header: terraform-plan
-          message: |
-            ### 🧩 Terraform Plan Output
-            ```
-            $(tail -n 50 plan.log)
-            ```
-            ✅ Plan completed successfully.
-
-      - name: Comment Apply Output on PR
-        if: steps.apply.conclusion == 'success' && github.event.issue.number != ''
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          number: ${{ github.event.issue.number }}
-          header: terraform-apply
-          message: |
-            ### 🚀 Terraform Apply Output
-            ```
-            $(tail -n 50 apply.log)
-            ```
-            ✅ Apply completed successfully.
