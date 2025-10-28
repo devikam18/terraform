@@ -1,66 +1,37 @@
-name: Terraform CI/CD with PR Automation
+name: Terraform CI/CD for Developer Branch
 
 on:
   push:
     branches:
       - developer
+  pull_request:
+    branches:
+      - developer
+    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-
 jobs:
-  ########################################
-  # 1. Auto-create Pull Request when pushing to 'developer'
-  ########################################
-  create-pr:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create or update PR to main
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: main
-          branch: developer
-          title: "Auto PR from developer branch"
-          body: "This PR was automatically created for Terraform workflow execution."
-
-  ########################################
-  # 2. Terraform Plan & Apply from PR comments
-  ########################################
   terraform:
     if: >
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      (
-        contains(github.event.comment.body, '/plan') ||
-        contains(github.event.comment.body, '/apply')
-      )
+      github.ref == 'refs/heads/developer' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'developer') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply'))
     runs-on: ubuntu-latest
-
     env:
       AWS_REGION: ap-south-2
       TF_IN_AUTOMATION: "true"
 
     steps:
       ########################################
-      # Checkout PR branch
+      # 1. Checkout repository
       ########################################
-      - name: Checkout PR branch
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: developer
 
       ########################################
-      # Configure AWS credentials
+      # 2. Configure AWS credentials
       ########################################
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -70,7 +41,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       ########################################
-      # Setup Terraform
+      # 3. Setup Terraform
       ########################################
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -78,42 +49,46 @@ jobs:
           terraform_version: 1.9.5
 
       ########################################
-      # Terraform Init
+      # 4. Terraform Init & Validate
       ########################################
       - name: Terraform Init
         run: terraform init -input=false
 
-      ########################################
-      # Terraform Validate
-      ########################################
       - name: Terraform Validate
         run: terraform validate
 
       ########################################
-      # Terraform Plan or Apply
+      # 5. Terraform Plan
       ########################################
-      - name: Run Terraform Command
-        id: tf
-        run: |
-          if [[ "${{ github.event.comment.body }}" == *"/plan"* ]]; then
-            echo "🪴 Running Terraform Plan..."
-            terraform plan -no-color -out=tfplan | tee plan.log
-          elif [[ "${{ github.event.comment.body }}" == *"/apply"* ]]; then
-            echo "🚀 Running Terraform Apply..."
-            terraform apply -auto-approve -no-color tfplan | tee plan.log
-          fi
-        continue-on-error: true
+      - name: Terraform Plan
+        if: >
+          github.event_name == 'push' ||
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan'))
+        id: plan
+        run: terraform plan -no-color -out=tfplan | tee plan.log
+
+      - name: Post Plan Comment
+        if: >
+          github.event_name == 'push' ||
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan'))
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: terraform-plan
+          path: plan.log
 
       ########################################
-      # Post Terraform Output to PR Comment
+      # 6. Terraform Apply (only on comment)
       ########################################
-      - name: Post Terraform Output to PR
-        uses: peter-evans/create-or-update-comment@v4
+      - name: Terraform Apply
+        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply')
+        id: apply
+        run: terraform apply -auto-approve tfplan | tee apply.log
+
+      - name: Post Apply Comment
+        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/apply')
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          body: |
-            ## 🪴 Terraform Output
-            ```
-            ${{ steps.tf.outputs.stdout || '' }}
-            ```
+          header: terraform-apply
+          path: apply.log
