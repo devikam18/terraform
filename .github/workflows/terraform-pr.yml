@@ -3,7 +3,7 @@ name: Terraform PR CI/CD with Comment Control
 on:
   pull_request:
     branches:
-      - developer
+      - main
     types: [opened, synchronize, reopened]
 
   issue_comment:
