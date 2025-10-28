@@ -1,15 +1,13 @@
-name: Terraform PR CI/CD with Comment Control + Auto Apply
+name: Terraform PR CI/CD with Comment Control + Auto PR + Auto Apply
 
 on:
+  push:
+    branches:
+      - developer
   pull_request_target:
     types: [opened, synchronize, reopened]
-    branches:
-      - main
-      - developer
-
   issue_comment:
     types: [created]
-
   workflow_dispatch:
 
 permissions:
@@ -20,9 +18,31 @@ permissions:
 env:
   AWS_REGION: ap-south-2
   TF_IN_AUTOMATION: "true"
-  AUTO_APPLY: "false" # 🔹 set this to "true" to enable auto apply after plan
+  AUTO_APPLY: "false" # set this true for auto apply
 
 jobs:
+  ########################################
+  # Auto-create PR from developer → main
+  ########################################
+  create-pr:
+    name: Auto PR Creation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/developer')
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create PR to main
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_PAT }}
+          branch: developer
+          base: main
+          title: "Terraform Infra Update - $(date +'%Y-%m-%d %H:%M')"
+          body: "Auto-created PR for infrastructure changes."
+          draft: false
+
   ########################################
   # Terraform Plan
   ########################################
@@ -30,15 +50,16 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request_target'
+    needs: [create-pr]
 
     steps:
-      - name: Checkout PR code
+      - name: Checkout PR Code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -66,7 +87,7 @@ jobs:
           path: tfplan
 
       - name: Post Plan Result to PR
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
@@ -78,7 +99,7 @@ jobs:
             if (autoApply) {
               body += `\n⚙️ Auto-apply is enabled. Applying changes now...`;
             } else {
-              body += `\n💬 Comment **/apply** to deploy these changes.`;
+              body += `\n💬 Comment **/apply** below to deploy these changes.`;
             }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -87,17 +108,22 @@ jobs:
               body: body
             });
 
-      # 🔹 Automatically trigger Apply if AUTO_APPLY=true
+      # Trigger Auto Apply if Enabled
       - name: Trigger Apply Job
         if: env.AUTO_APPLY == 'true'
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.GH_PAT }}
           event-type: trigger-terraform-apply
-          client-payload: '{"pr_number": "${{ github.event.pull_request.number }}"}'
+          client-payload: |
+            {
+              "pr_number": "${{ github.event.pull_request.number }}",
+              "ref": "${{ github.event.pull_request.head.ref }}",
+              "repo": "${{ github.repository }}"
+            }
 
   ########################################
-  # Terraform Apply (via comment or auto)
+  # Terraform Apply (manual comment or auto)
   ########################################
   terraform-apply:
     name: Terraform Apply
@@ -110,13 +136,13 @@ jobs:
           github.event.action == 'trigger-terraform-apply')
 
     steps:
-      - name: Checkout PR code
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue?.pull_request?.head.ref || github.event.client_payload?.ref || github.event.pull_request?.head.ref }}
-          repository: ${{ github.event.issue?.pull_request?.head.repo.full_name || github.event.client_payload?.repo || github.event.pull_request?.head.repo.full_name }}
+          ref: ${{ github.event.issue?.pull_request?.head.ref || github.event.client_payload?.ref }}
+          repository: ${{ github.event.issue?.pull_request?.head.repo.full_name || github.event.client_payload?.repo }}
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -140,7 +166,8 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan | tee apply.txt
 
-      - id: tf
+      - name: Capture Output
+        id: output
         run: |
           if terraform output -raw ec2_public_ip >/dev/null 2>&1; then
             echo "WEB_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
@@ -148,8 +175,8 @@ jobs:
             echo "WEB_IP=Not available" >> $GITHUB_ENV
           fi
 
-      - name: Post Apply Result to PR
-        uses: actions/github-script@v6
+      - name: Comment Apply Result
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT }}
           script: |
