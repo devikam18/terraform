@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - developer
+  pull_request:
+    branches:
+      - main
   issue_comment:
     types: [created]
 
@@ -18,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     if: |
-      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' && (
         contains(github.event.comment.body, '/plan') ||
         contains(github.event.comment.body, '/apply')
@@ -47,7 +50,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        if: contains(github.event.comment.body, '/plan') || github.event_name == 'push'
+        if: contains(github.event.comment.body, '/plan') || github.event_name == 'pull_request'
         run: |
           terraform plan -no-color -out=tfplan | tee plan.log
         continue-on-error: true
@@ -59,26 +62,42 @@ jobs:
           terraform apply -auto-approve -no-color tfplan | tee apply.log
         continue-on-error: true
 
-      - name: Comment Plan Output on PR
+      - name: Upload Plan Log
         if: steps.plan.conclusion == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-log
+          path: plan.log
+
+      - name: Upload Apply Log
+        if: steps.apply.conclusion == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-apply-log
+          path: apply.log
+
+      - name: Comment Plan Output on PR
+        if: steps.plan.conclusion == 'success' && github.event.pull_request.number != ''
         uses: marocchino/sticky-pull-request-comment@v2
         with:
+          number: ${{ github.event.pull_request.number }}
           header: terraform-plan
           message: |
             ### 🧩 Terraform Plan Output
             ```
-            $(cat plan.log | tail -n 50)
+            $(tail -n 50 plan.log)
             ```
             ✅ Plan completed successfully.
 
       - name: Comment Apply Output on PR
-        if: steps.apply.conclusion == 'success'
+        if: steps.apply.conclusion == 'success' && github.event.issue.number != ''
         uses: marocchino/sticky-pull-request-comment@v2
         with:
+          number: ${{ github.event.issue.number }}
           header: terraform-apply
           message: |
             ### 🚀 Terraform Apply Output
             ```
-            $(cat apply.log | tail -n 50)
+            $(tail -n 50 apply.log)
             ```
             ✅ Apply completed successfully.
