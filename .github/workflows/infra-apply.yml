@@ -1,143 +1,156 @@
-name: Terraform Unified CI/CD
+name: Terraform PR Workflow
 
 on:
-  push:
-    branches:
-      - developer
-      - main
-
   pull_request:
-    branches:
-      - main
     types: [opened, synchronize, reopened]
-
   issue_comment:
     types: [created]
-
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
 
 jobs:
   terraform:
-    name: Terraform Pipeline (Plan/Scan/PR/Comment/Apply)
+    # Run ONLY when:
+    #   - PR opened/sync
+    #   - OR comment includes /plan or /apply
+    if: |
+      github.event_name == 'pull_request' ||
+      (
+        github.event_name == 'issue_comment' &&
+        (
+          contains(github.event.comment.body, '/plan') ||
+          contains(github.event.comment.body, '/Plan') ||
+          contains(github.event.comment.body, '/PLAN') ||
+          contains(github.event.comment.body, '/apply') ||
+          contains(github.event.comment.body, '/Apply') ||
+          contains(github.event.comment.body, '/APPLY')
+        )
+      )
+
     runs-on: ubuntu-latest
 
     steps:
 
-      ############################################################
-      # CHECKOUT REPO
-      ############################################################
-      - name: Checkout repository
+      #######################################################
+      # 1. CHECKOUT
+      #######################################################
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      ############################################################
-      # AUTO CREATE PULL REQUEST FROM DEVELOPER → MAIN
-      ############################################################
-      - name: Auto Create PR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/developer'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          title: "Terraform Infra Update"
-          body: "Automated PR for Terraform infrastructure changes."
-          base: main
-          branch: developer
-
-      ############################################################
-      # CHECK IF THIS IS A COMMENT EVENT
-      ############################################################
-      - name: Set Event Flags
-        id: flags
-        run: |
-          echo "IS_PLAN=$(echo '${{ github.event.comment.body }}' | grep -i 'plan' || true)" >> $GITHUB_OUTPUT
-          echo "IS_APPLY=$(echo '${{ github.event.comment.body }}' | grep -i 'apply' || true)" >> $GITHUB_OUTPUT
-
-      ############################################################
-      # AWS CREDENTIALS
-      ############################################################
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-2
-
-      ############################################################
-      # TERRAFORM SETUP
-      ############################################################
+      #######################################################
+      # 2. Setup Terraform
+      #######################################################
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: 1.9.5
+          terraform_version: 1.6.6
 
+      #######################################################
+      # 3. Terraform Init
+      #######################################################
       - name: Terraform Init
+        working-directory: ./terraform
         run: terraform init -input=false
 
-      ############################################################
-      # TERRAFORM VALIDATE + SECURITY SCANS (ONLY ON PR & PUSH)
-      ############################################################
+      #######################################################
+      # 4. Terraform Format
+      #######################################################
+      - name: Terraform FMT
+        working-directory: ./terraform
+        run: terraform fmt -check
+
+      #######################################################
+      # 5. Terraform Validate
+      #######################################################
       - name: Terraform Validate
-        if: github.event_name != 'issue_comment'
+        working-directory: ./terraform
         run: terraform validate
 
-      - name: Run tfsec Scan
-        if: github.event_name != 'issue_comment'
-        uses: aquasecurity/tfsec-action@v1.0.0
-
-      - name: Run Checkov Scan
-        if: github.event_name != 'issue_comment'
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          directory: .
-          quiet: true
-          soft_fail: false
-
-      ############################################################
-      # TERRAFORM PLAN (ON PR + ON COMMENT "plan")
-      ############################################################
-      - name: Run Terraform Plan
+      #######################################################
+      # 6. Terraform PLAN (Runs on PR or /plan comment)
+      #######################################################
+      - name: Terraform Plan
         id: plan
-        if: github.event_name == 'pull_request' || steps.flags.outputs.IS_PLAN != ''
-        run: terraform plan -no-color
+        if: |
+          github.event_name == 'pull_request' ||
+          (
+            github.event_name == 'issue_comment' &&
+            (
+              contains(github.event.comment.body, '/plan') ||
+              contains(github.event.comment.body, '/Plan') ||
+              contains(github.event.comment.body, '/PLAN')
+            )
+          )
+        working-directory: ./terraform
+        run: terraform plan -no-color > plan.txt
 
+      #######################################################
+      # 7. COMMENT PLAN OUTPUT BACK TO PR
+      #######################################################
       - name: Comment Plan Output
-        if: github.event_name == 'pull_request' || steps.flags.outputs.IS_PLAN != ''
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number || github.event.issue.number }}
-          body: |
-            ### 🌍 Terraform PLAN Output
-            ```
-            ${{ steps.plan.outputs.stdout }}
-            ```
-
-      ############################################################
-      # TERRAFORM APPLY ONLY IF:
-      # 1. Comment contains "apply"
-      # 2. PR is merged (push to main)
-      ############################################################
-      - name: Terraform Apply
-        if: steps.flags.outputs.IS_APPLY != '' && github.ref == 'refs/heads/main'
-        id: apply
-        run: terraform apply -auto-approve
-
-      - name: Comment Apply Output
-        if: steps.flags.outputs.IS_APPLY != '' && github.ref == 'refs/heads/main'
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          body: |
-            ### 🚀 Terraform APPLY Result
-            Terraform apply executed successfully.
-
-      ############################################################
-      # GET OUTPUTS (ONLY AFTER APPLY)
-      ############################################################
-      - name: Get Terraform Output
-        if: steps.flags.outputs.IS_APPLY != '' && github.ref == 'refs/heads/main'
-        id: tfout
+        if: steps.plan.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          WEB_IP=$(terraform output -raw ec2_public_ip)
-          echo "WEB_IP=$WEB_IP" >> $GITHUB_ENV
-          echo "WEB_IP=$WEB_IP" >> $GITHUB_OUTPUT
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          PLAN_CONTENT=$(cat terraform/plan.txt)
+          gh pr comment "$PR_NUMBER" --body "### Terraform Plan Result 🚀
+
+          \`\`\`
+          $PLAN_CONTENT
+          \`\`\`
+          "
+
+      #######################################################
+      # 8. WAIT FOR APPROVAL (ONLY FOR PR)
+      #######################################################
+      - name: Manual Approval Before Apply
+        if: |
+          github.event_name == 'pull_request'
+        uses: trstringer/manual-approval@v1
+        with:
+          approvers: ' '      # <-- change to approver GitHub username
+          minimum-approvals: 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      #######################################################
+      # 9. Terraform APPLY (Triggered after approval or /apply)
+      #######################################################
+      - name: Terraform Apply
+        id: apply
+        if: |
+          (
+            github.event_name == 'issue_comment' &&
+            (
+              contains(github.event.comment.body, '/apply') ||
+              contains(github.event.comment.body, '/Apply') ||
+              contains(github.event.comment.body, '/APPLY')
+            )
+          ) ||
+          (
+            github.event_name == 'pull_request'
+          )
+        working-directory: ./terraform
+        run: terraform apply -auto-approve -no-color > apply.txt
+
+      #######################################################
+      # 10. COMMENT APPLY OUTPUT BACK TO PR
+      #######################################################
+      - name: Comment Apply Output
+        if: steps.apply.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          APPLY_CONTENT=$(cat terraform/apply.txt)
+          gh pr comment "$PR_NUMBER" --body "### Terraform Apply Result ✅
+
+          \`\`\`
+          $APPLY_CONTENT
+          \`\`\`
+          "
