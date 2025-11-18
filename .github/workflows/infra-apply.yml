@@ -53,21 +53,18 @@ jobs:
       # 3. Terraform Init
       #######################################################
       - name: Terraform Init
-        working-directory: ./terraform
         run: terraform init -input=false
 
       #######################################################
       # 4. Terraform Format
       #######################################################
       - name: Terraform FMT
-        working-directory: ./terraform
         run: terraform fmt -check
 
       #######################################################
       # 5. Terraform Validate
       #######################################################
       - name: Terraform Validate
-        working-directory: ./terraform
         run: terraform validate
 
       #######################################################
@@ -85,7 +82,7 @@ jobs:
               contains(github.event.comment.body, '/PLAN')
             )
           )
-        working-directory: ./terraform
+      
         run: terraform plan -no-color > plan.txt
 
       #######################################################
@@ -135,7 +132,7 @@ jobs:
           (
             github.event_name == 'pull_request'
           )
-        working-directory: ./terraform
+        
         run: terraform apply -auto-approve -no-color > apply.txt
 
       #######################################################
