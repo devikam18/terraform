@@ -110,7 +110,7 @@ resource "aws_security_group" "web_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-   ingress {
+  ingress {
     description = "Custom TCP 8080"
     from_port   = 9100
     to_port     = 9100
@@ -118,7 +118,7 @@ resource "aws_security_group" "web_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-   ingress {
+  ingress {
     description = "Custom TCP 8080"
     from_port   = 9090
     to_port     = 9090
@@ -126,7 +126,7 @@ resource "aws_security_group" "web_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-   ingress {
+  ingress {
     description = "Custom TCP 8080"
     from_port   = 3000
     to_port     = 3000
@@ -152,16 +152,16 @@ resource "aws_iam_role" "ec2_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action   = "sts:AssumeRole"
-      Effect   = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
 }
 
 resource "aws_iam_role_policy" "ec2_policy" {
-  name   = "ec2_policy"
-  role   = aws_iam_role.ec2_role.id
+  name = "ec2_policy"
+  role = aws_iam_role.ec2_role.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -182,13 +182,13 @@ resource "aws_iam_instance_profile" "ec2_profile_latest" {
 # EC2 Instance
 ############################################
 resource "aws_instance" "web_server" {
-  ami                    = "ami-0bd4cda58efa33d23"
-  instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.subnet_1.id
-  vpc_security_group_ids = [aws_security_group.web_sg.id]
-  key_name               = "deployer-new"
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile_latest.name
-  associate_public_ip_address = true  
+  ami                         = "ami-0bd4cda58efa33d23"
+  instance_type               = "t3.micro"
+  subnet_id                   = aws_subnet.subnet_1.id
+  vpc_security_group_ids      = [aws_security_group.web_sg.id]
+  key_name                    = "deployer-new"
+  iam_instance_profile        = aws_iam_instance_profile.ec2_profile_latest.name
+  associate_public_ip_address = true
 
   tags = { Name = "web-server" }
 }
@@ -204,25 +204,25 @@ resource "aws_db_subnet_group" "main_db_subnet_group" {
 }
 
 resource "aws_db_instance" "main_db" {
-  engine               = "mysql"
-  instance_class       = "db.t4g.micro"
-  allocated_storage    = 20
-  storage_type         = "gp2"
-  db_name              = "mydb"
-  username             = "admin"
-  password             = "passw0rd"
+  engine                 = "mysql"
+  instance_class         = "db.t4g.micro"
+  allocated_storage      = 20
+  storage_type           = "gp2"
+  db_name                = "mydb"
+  username               = "admin"
+  password               = "passw0rd"
   vpc_security_group_ids = [aws_security_group.web_sg.id]
-  db_subnet_group_name = aws_db_subnet_group.main_db_subnet_group.name
-  multi_az             = false
-  publicly_accessible  = false
-  skip_final_snapshot  = true
+  db_subnet_group_name   = aws_db_subnet_group.main_db_subnet_group.name
+  multi_az               = false
+  publicly_accessible    = false
+  skip_final_snapshot    = true
 }
 
 ############################################
 # Ansible Inventory
 ############################################
 resource "local_file" "ansible_inventory" {
-  content = <<EOT
+  content  = <<EOT
 [web]
 web1 ansible_host=${aws_instance.web_server.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=$DEPLOYER_KEY
 
