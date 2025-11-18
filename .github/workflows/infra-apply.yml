@@ -14,9 +14,6 @@ permissions:
 
 jobs:
   terraform:
-    # Run ONLY when:
-    #   - PR opened/sync
-    #   - OR comment includes /plan or /apply
     if: |
       github.event_name == 'pull_request' ||
       (
@@ -30,46 +27,92 @@ jobs:
           contains(github.event.comment.body, '/APPLY')
         )
       )
-
     runs-on: ubuntu-latest
 
     steps:
 
-      #######################################################
-      # 1. CHECKOUT
-      #######################################################
+      #--------------------------------------------#
+      # 1. Check out
+      #--------------------------------------------#
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      #######################################################
-      # 2. Setup Terraform
-      #######################################################
+      #--------------------------------------------#
+      # 2. AWS Credentials
+      #--------------------------------------------#
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-2
+
+      #--------------------------------------------#
+      # 3. Setup Terraform
+      #--------------------------------------------#
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.6.6
 
-      #######################################################
-      # 3. Terraform Init
-      #######################################################
+      #--------------------------------------------#
+      # 4. Terraform Init
+      #--------------------------------------------#
       - name: Terraform Init
         run: terraform init -input=false
 
-      #######################################################
-      # 4. Terraform Format
-      #######################################################
+      #--------------------------------------------#
+      # 5. Terraform FMT
+      #--------------------------------------------#
       - name: Terraform FMT
         run: terraform fmt -check
 
-      #######################################################
-      # 5. Terraform Validate
-      #######################################################
+      #--------------------------------------------#
+      # 6. Terraform Validate
+      #--------------------------------------------#
       - name: Terraform Validate
         run: terraform validate
 
-      #######################################################
-      # 6. Terraform PLAN (Runs on PR or /plan comment)
-      #######################################################
+      #--------------------------------------------#
+      # 7. SECURITY SCAN — CHECKOV
+      #--------------------------------------------#
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov Security Scan
+        id: checkov
+        run: |
+          checkov -d . --quiet --output cli --output-file-path checkov-report.txt || true
+
+      # Comment results back on PR
+      - name: Upload Checkov Report to PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          REPORT=$(cat checkov-report.txt)
+
+          gh pr comment "$PR_NUMBER" --body "### 🔒 Checkov Security Scan Report
+
+          \`\`\`
+          $REPORT
+          \`\`\`
+          "
+
+      #--------------------------------------------#
+      # 8. SENTINEL – ONLY WORKS WITH TERRAFORM CLOUD
+      #--------------------------------------------#
+      # Uncomment these only when using Terraform Cloud
+      #
+      # - name: Run Sentinel Policy Tests
+      #   run: |
+      #     sentinel test
+      #
+      #--------------------------------------------#
+
+      #--------------------------------------------#
+      # 9. Terraform Plan
+      #--------------------------------------------#
       - name: Terraform Plan
         id: plan
         if: |
@@ -82,19 +125,16 @@ jobs:
               contains(github.event.comment.body, '/PLAN')
             )
           )
-      
         run: terraform plan -no-color > plan.txt
 
-      #######################################################
-      # 7. COMMENT PLAN OUTPUT BACK TO PR
-      #######################################################
+      # Comment PLAN back
       - name: Comment Plan Output
         if: steps.plan.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
-          PLAN_CONTENT=$(cat terraform/plan.txt)
+          PLAN_CONTENT=$(cat plan.txt)
           gh pr comment "$PR_NUMBER" --body "### Terraform Plan Result 🚀
 
           \`\`\`
@@ -102,22 +142,21 @@ jobs:
           \`\`\`
           "
 
-      #######################################################
-      # 8. WAIT FOR APPROVAL (ONLY FOR PR)
-      #######################################################
+      #--------------------------------------------#
+      # 10. Manual Approval
+      #--------------------------------------------#
       - name: Manual Approval Before Apply
-        if: |
-          github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         uses: trstringer/manual-approval@v1
         with:
-          approvers: ' '      # <-- change to approver GitHub username
+          approvers: "${{ github.actor }}"   # self approval for now
           minimum-approvals: 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      #######################################################
-      # 9. Terraform APPLY (Triggered after approval or /apply)
-      #######################################################
+      #--------------------------------------------#
+      # 11. Terraform Apply
+      #--------------------------------------------#
       - name: Terraform Apply
         id: apply
         if: |
@@ -132,19 +171,17 @@ jobs:
           (
             github.event_name == 'pull_request'
           )
-        
         run: terraform apply -auto-approve -no-color > apply.txt
 
-      #######################################################
-      # 10. COMMENT APPLY OUTPUT BACK TO PR
-      #######################################################
+      # Comment APPLY back
       - name: Comment Apply Output
         if: steps.apply.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
-          APPLY_CONTENT=$(cat terraform/apply.txt)
+          APPLY_CONTENT=$(cat apply.txt)
+
           gh pr comment "$PR_NUMBER" --body "### Terraform Apply Result ✅
 
           \`\`\`
