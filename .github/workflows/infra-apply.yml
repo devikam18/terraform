@@ -83,5 +83,3 @@ jobs:
             {
               "web_ip": "${{ steps.tf.outputs.WEB_IP }}"
             }
-
-
